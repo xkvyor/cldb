@@ -27,4 +27,6 @@ AC_TYPE_UINT8_T
 AC_FUNC_MALLOC
 AC_CHECK_FUNCS([memset strdup])
 
-AC_OUTPUT([Makefile])
+SUBDIRS = src
+
+AC_OUTPUT([Makefile src/Makefile])
