@@ -4,6 +4,49 @@
 
 NAMESPACE_BEGIN
 
+Buffer::Buffer():
+	buf_(NULL), used_(0), capacity_(0)
+{
+	resize(Buffer::default_size);
+}
+
+Buffer::~Buffer()
+{
+	deleteArray(buf_);
+}
+
+void Buffer::resize(size_t size)
+{
+	byte* newbuf = new byte[size];
+	if (buf_)
+	{
+		memcpy(newbuf, buf_, used_);
+	}
+	deleteArray(buf_);
+	buf_ = newbuf;
+	capacity_ = size;
+}
+
+void Buffer::clear()
+{
+	used_ = 0;
+}
+
+void Buffer::append(const void* data, size_t size)
+{
+	if (used_ + size > capacity_)
+	{
+		size_t newcap = capacity_;
+		while(used_ + size > newcap)
+		{
+			newcap <<= 1;
+		}
+		resize(newcap);
+	}
+	memcpy(buf_+used_, data, size);
+	used_ += size;
+}
+
 Storage::Storage(const char* filename):
 	file_(NULL), cache_(NULL), mem_(NULL), valid_(false)
 {

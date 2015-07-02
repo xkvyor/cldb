@@ -12,6 +12,28 @@ struct BufferNode {
 	void* buf_;
 };
 
+class Buffer {
+private:
+	static const size_t default_size = 64;
+
+private:
+	byte* buf_;
+	size_t used_;
+	size_t capacity_;
+
+	void resize(size_t size);
+
+public:
+	Buffer();
+	~Buffer();
+
+	void clear();
+	void append(const void* data, size_t size);
+
+	inline byte* getBuffer() { return buf_; }
+	inline size_t getSize() { return used_; }
+};
+
 class File;
 class MemPool;
 

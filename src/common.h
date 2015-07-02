@@ -116,6 +116,24 @@ struct OverflowPageHeader {
 	offset_t off_;
 };
 
+enum ItemType {
+	OnPage = 0,
+	OffPage = 1
+};
+
+struct OnPageItemHeader {
+	// ItemType type_;
+	size_t size_;
+};
+
+struct OffPageItemHeader {
+	// ItemType type_;
+	size_t local_size_;
+	size_t total_size_;
+	page_id_t ov_page_id_;
+	offset_t ov_off_;
+};
+
 class Iterator {
 public:
 	virtual void process(const void* key, size_t ksize, const void* val, size_t vsize) = 0;

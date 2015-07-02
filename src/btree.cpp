@@ -3,55 +3,12 @@
 
 NAMESPACE_BEGIN
 
-Buffer::Buffer():
-	buf_(NULL), used_(0), capacity_(0)
-{
-	resize(Buffer::default_size);
-}
-
-Buffer::~Buffer()
-{
-	deleteArray(buf_);
-}
-
-void Buffer::resize(size_t size)
-{
-	byte* newbuf = new byte[size];
-	if (buf_)
-	{
-		memcpy(newbuf, buf_, used_);
-	}
-	deleteArray(buf_);
-	buf_ = newbuf;
-	capacity_ = size;
-}
-
-void Buffer::clear()
-{
-	used_ = 0;
-}
-
-void Buffer::append(const void* data, size_t size)
-{
-	if (used_ + size > capacity_)
-	{
-		size_t newcap = capacity_;
-		while(used_ + size > newcap)
-		{
-			newcap <<= 1;
-		}
-		resize(newcap);
-	}
-	memcpy(buf_+used_, data, size);
-	used_ += size;
-}
-
 BTree::BTree(Storage* store):
 	store_(store), page_size_(store_->getPageSize())
 {
 	if (store_->getRootId() == 0)
 	{
-		buildRootPage(PageType::Leaf);
+		buildRootPage(BTreePageType::Leaf);
 		store_->storeOverflowData(NULL, 0);
 	}
 }
@@ -59,9 +16,8 @@ BTree::BTree(Storage* store):
 BTree::~BTree()
 {}
 
-
-static inline void setPageType(void* page, PageType type);
-static inline PageType getPageType(void* page);
+static inline void setPageType(void* page, BTreePageType type);
+static inline BTreePageType getPageType(void* page);
 static inline size_t getPageSpace(void* page);
 
 static inline void setLeafPageId(void* page, page_id_t page_id);
@@ -97,25 +53,25 @@ static inline ItemType getItemType(const void* item);
 static inline void setItemSize(void* item, size_t size);
 static inline size_t getItemSize(const void* item);
 
-void setPageType(void* page, PageType type)
+void setPageType(void* page, BTreePageType type)
 {
 	((LeafPageHeader*)page)->type_ = type;
 }
 
-PageType getPageType(void* page)
+BTreePageType getPageType(void* page)
 {
 	return ((LeafPageHeader*)page)->type_;
 }
 
 size_t getPageSpace(void* page)
 {
-	PageType type = getPageType(page);
-	if (type == PageType::Internal)
+	BTreePageType type = getPageType(page);
+	if (type == BTreePageType::Internal)
 	{
 		return getInternalOffset(page) - 
 			(sizeof(InternalPageHeader) + getInternalItemCount(page) * sizeof(offset_t));
 	}
-	else if (type == PageType::Leaf)
+	else if (type == BTreePageType::Leaf)
 	{
 		return getLeafOffset(page) -
 			(sizeof(LeafPageHeader) + getLeafItemCount(page) * sizeof(offset_t));
@@ -294,14 +250,14 @@ ItemType getItemType(const void* item)
 	return (*(size_t*)item & (0x1 << ((sizeof(size_t) << 3) - 1))) ? ItemType::OffPage : ItemType::OnPage;
 }
 
-void BTree::buildRootPage(PageType type)
+void BTree::buildRootPage(BTreePageType type)
 {
 	page_id_t rid = store_->getNewPage();
 	store_->setRootId(rid);
 	void* page = store_->acquire(rid);
 	zeroMemory(page, page_size_);
 	setPageType(page, type);
-	if (type == PageType::Internal)
+	if (type == BTreePageType::Internal)
 	{
 		setInternalPageId(page, rid);
 		setInternalOffset(page, page_size_);
@@ -368,7 +324,7 @@ bool BTree::rec_search(const void* key, size_t ksize, page_id_t* page_id, uint32
 	{
 		page = store_->getPage(cur);
 		found = search(page, key, ksize, &i);
-		if (getPageType(page) == PageType::Internal)
+		if (getPageType(page) == BTreePageType::Internal)
 		{
 			cur = getChild(page, i + (found ? 1 : 0));
 		}
@@ -385,10 +341,10 @@ bool BTree::rec_search(const void* key, size_t ksize, page_id_t* page_id, uint32
 
 bool BTree::search(void* page, const void* key, size_t ksize, uint32_t* index)
 {
-	PageType type = getPageType(page);
-	int32_t step = (type == PageType::Leaf ? 2 : 1);
+	BTreePageType type = getPageType(page);
+	int32_t step = (type == BTreePageType::Leaf ? 2 : 1);
 	int32_t left = 0;
-	int32_t right = (type == PageType::Leaf ?
+	int32_t right = (type == BTreePageType::Leaf ?
 				getLeafItemCount(page) :
 				getInternalItemCount(page)) - step;
 	int32_t r, mid;
@@ -396,7 +352,7 @@ bool BTree::search(void* page, const void* key, size_t ksize, uint32_t* index)
 
 	while (left <= right)
 	{
-		mid = (type == PageType::Leaf ?
+		mid = (type == BTreePageType::Leaf ?
 			((left + right) >> 1) & ~0x1 :
 			(left + right) >> 1);
 
@@ -440,10 +396,10 @@ void BTree::getItem(page_id_t page_id, uint32_t index, Buffer& buf)
 
 void BTree::getItem(void* page, uint32_t index, Buffer& buf)
 {
-	PageType type = getPageType(page);
+	BTreePageType type = getPageType(page);
 	byte* p;
 	buf.clear();
-	if (type == PageType::Internal)
+	if (type == BTreePageType::Internal)
 	{
 		p = (byte*)page + getInternalItemOffset(page, index) + sizeof(page_id_t);
 	}
@@ -715,11 +671,11 @@ void BTree::splitLeaf(page_id_t page_id)
 	void* split_page = store_->getPage(split_page_id);
 
 	page_id_t parent = getLeafParent(page);
-	setPageType(split_page, PageType::Leaf);
+	setPageType(split_page, BTreePageType::Leaf);
 	setLeafPageId(split_page, split_page_id);
 	if (parent == 0)
 	{
-		buildRootPage(PageType::Internal);
+		buildRootPage(BTreePageType::Internal);
 		parent = store_->getRootId();
 		setLeafParent(page, parent);
 	}
@@ -767,11 +723,11 @@ void BTree::splitInternal(page_id_t page_id)
 	void* split_page = store_->getPage(split_page_id);
 
 	page_id_t parent = getInternalParent(page);
-	setPageType(split_page, PageType::Internal);
+	setPageType(split_page, BTreePageType::Internal);
 	setInternalPageId(split_page, split_page_id);
 	if (parent == 0)
 	{
-		buildRootPage(PageType::Internal);
+		buildRootPage(BTreePageType::Internal);
 		parent = store_->getRootId();
 		setInternalParent(page, parent);
 	}
@@ -797,7 +753,7 @@ void BTree::splitInternal(page_id_t page_id)
 	{
 		p = (byte*)page + getInternalItemOffset(page, i);
 		cp = store_->getPage(*(page_id_t*)p);
-		if (getPageType(cp) == PageType::Internal)
+		if (getPageType(cp) == BTreePageType::Internal)
 		{
 			setInternalParent(cp, split_page_id);
 		}
@@ -811,7 +767,7 @@ void BTree::splitInternal(page_id_t page_id)
 		memcpy((byte*)split_page+getInternalOffset(split_page), p, size);
 	}
 	cp = store_->getPage(getLastChild(page));
-	if (getPageType(cp) == PageType::Internal)
+	if (getPageType(cp) == BTreePageType::Internal)
 	{
 		setInternalParent(cp, split_page_id);
 	}
@@ -921,7 +877,7 @@ void BTree::traverse(Iterator* iter)
 {
 	page_id_t pid = store_->getRootId();
 	void* page = store_->getPage(pid);
-	while(getPageType(page) == PageType::Internal)
+	while(getPageType(page) == BTreePageType::Internal)
 	{
 		pid = getChild(page, 0);
 		page = store_->getPage(pid);
