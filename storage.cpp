@@ -175,12 +175,15 @@ void Storage::storeOverflowData(const void* data, size_t size)
 {
 	lock();
 
-	const byte* buf = (const byte*)data;
+	void* page;
 
 	if (getOverflowPageId() == 0)
 	{
 		meta_.overflow_page_ = getNewPage();
-		meta_.overflow_offset_ = 0;
+		meta_.overflow_offset_ = sizeof(OverflowPageHeader);
+		page = getPage(meta_.overflow_page_);
+		((OverflowPageHeader*)page)->next_ = 0;
+		((OverflowPageHeader*)page)->off_ = sizeof(OverflowPageHeader);
 	}
 
 	while(size > 0)
@@ -189,16 +192,23 @@ void Storage::storeOverflowData(const void* data, size_t size)
 		offset_t off = getOverflowPageOffset();
 
 		size_t write_bytes = min(getPageSize() - off, size);
-		file_->write(pageOffset(pid), buf, write_bytes);
 
-		buf += write_bytes;
+		void* page = getPage(pid);
+		memcpy((byte*)page+off, data, write_bytes);
+
+		data = (byte*)data + write_bytes;
 		size -= write_bytes;
+
 		meta_.overflow_offset_ += write_bytes;
 
 		if ((uint32_t)meta_.overflow_offset_ == getPageSize())
 		{
 			meta_.overflow_page_ = getNewPage();
-			meta_.overflow_offset_ = 0;
+			meta_.overflow_offset_ = sizeof(OverflowPageHeader);
+			((OverflowPageHeader*)page)->next_ = meta_.overflow_page_;
+			page = getPage(meta_.overflow_page_);
+			((OverflowPageHeader*)page)->next_ = 0;
+			((OverflowPageHeader*)page)->off_ = sizeof(OverflowPageHeader);
 		}
 	}
 

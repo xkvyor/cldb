@@ -31,12 +31,6 @@ struct LeafPageHeader {
 	size_t item_count_;
 };
 
-struct OverflowPageHeader {
-	page_id_t page_id_;
-	page_id_t next_;
-	offset_t off_;
-};
-
 struct FreePageHeader {
 	page_id_t page_id_;
 	page_id_t next_;
@@ -84,6 +78,8 @@ public:
 
 class Storage;
 
+typedef void (*iterfunc)(const void* data, size_t size);
+
 class BTree {
 private:
 	Storage* store_;
@@ -122,6 +118,8 @@ public:
 	size_t get(const void* key, size_t ksize, void** val);
 	void put(const void* key, size_t ksize, const void* val, size_t vsize);
 	void remove(const void* key, size_t ksize);
+
+	void traverse(iterfunc func);
 };
 
 NAMESPACE_END

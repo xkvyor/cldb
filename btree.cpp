@@ -52,6 +52,7 @@ BTree::BTree(Storage* store):
 	if (store_->getRootId() == 0)
 	{
 		buildRootPage(PageType::Leaf);
+		store_->storeOverflowData(NULL, 0);
 	}
 }
 
@@ -457,14 +458,14 @@ void BTree::getItem(void* page, uint32_t index, Buffer& buf)
 	else
 	{
 		size_t total = ((OffPageItemHeader*)p)->total_size_;
-		buf.append(p + sizeof(OffPageItemHeader), ((OffPageItemHeader*)p)->local_size_);
-		total -= ((OffPageItemHeader*)p)->local_size_;
+		buf.append(p + sizeof(OffPageItemHeader), getItemSize(p) - sizeof(OffPageItemHeader));
+		total -= getItemSize(p) - sizeof(OffPageItemHeader);
 		page_id_t pid = ((OffPageItemHeader*)p)->ov_page_id_;
 		offset_t off = ((OffPageItemHeader*)p)->ov_off_;
 		while (total > 0)
 		{
 			void* page = store_->getPage(pid);
-			size_t read_bytes = min(page_size_ - (off + sizeof(size_t)), total);
+			size_t read_bytes = min(page_size_-off, total);
 			buf.append((byte*)page + off, read_bytes);
 			total -= read_bytes;
 			if (total <= 0)
@@ -472,7 +473,7 @@ void BTree::getItem(void* page, uint32_t index, Buffer& buf)
 				break;
 			}
 			pid = ((OverflowPageHeader*)page)->next_;
-			off = 0;
+			off = sizeof(OverflowPageHeader);
 			page = store_->getPage(pid);
 		}
 	}
@@ -489,9 +490,14 @@ void BTree::put(const void* key, size_t ksize, const void* val, size_t vsize)
 		found = rec_search(key, ksize, &page_id, &i);
 		if (found)
 		{
-			if (modifyLeafItem(page_id, i, val, vsize))
+			if (modifyLeafItem(page_id, i+1, val, vsize))
 			{
 				break;
+			}
+			else
+			{
+				remove(key, ksize);
+				continue;
 			}
 		}
 		else
@@ -502,6 +508,7 @@ void BTree::put(const void* key, size_t ksize, const void* val, size_t vsize)
 			}
 		}
 		splitLeaf(page_id);
+		// iter();
 	}
 }
 
@@ -512,26 +519,28 @@ bool BTree::modifyLeafItem(page_id_t page_id, uint32_t index, const void* val, s
 	ItemType itype = getItemType(p);
 	if (itype == ItemType::OnPage && ((OnPageItemHeader*)p)->size_ >= vsize)
 	{
+		setItemSize(p, vsize);
 		memcpy(p + sizeof(OnPageItemHeader), val, vsize);
 	}
 	else if (itype == ItemType::OffPage && ((OffPageItemHeader*)p)->total_size_ >= vsize)
 	{
-		byte* val = val;
-		size_t read_bytes = ((OffPageItemHeader*)p)->total_size_;
-		memcpy(p+sizeof(OffPageItemHeader), val, read_bytes);
-		val += read_bytes;
-		vsize -= read_bytes;
+		size_t write_bytes = min(getItemSize(p) - sizeof(OffPageItemHeader), vsize);
+		((OffPageItemHeader*)p)->total_size_ = vsize;
+		setItemSize(p, write_bytes);
+		memcpy(p+sizeof(OffPageItemHeader), val, write_bytes);
+		val = (byte*)val + write_bytes;
+		vsize -= write_bytes;
 		page_id_t pid = ((OffPageItemHeader*)p)->ov_page_id_;
 		offset_t off = ((OffPageItemHeader*)p)->ov_off_;
 		while(vsize > 0)
 		{
 			void* page = store_->getPage(pid);
-			read_bytes = min(page_size_ - off, vsize);
-			memcpy((byte*)page+off, val, read_bytes);
-			val += read_bytes;
-			vsize -= read_bytes;
+			write_bytes = min(page_size_ - off, vsize);
+			memcpy((byte*)page+off, val, write_bytes);
+			val = (byte*)val + write_bytes;
+			vsize -= write_bytes;
 			pid = *(page_id_t*)page;
-			off = 0;
+			off = sizeof(OverflowPageHeader);
 		}
 	}
 	else
@@ -546,7 +555,8 @@ bool BTree::insertLeafItem(page_id_t page_id, uint32_t index,
 						const void* val, size_t vsize)
 {
 	void* page = store_->getPage(page_id);
-	size_t off_page_size = ((page_size_ - sizeof(LeafPageHeader)) / store_->getMinItems()) - sizeof(offset_t);
+	size_t off_page_size = adjustAlign(((page_size_ - sizeof(LeafPageHeader)) / store_->getMinItems())
+									 - sizeof(offset_t) - ALIGN_WIDTH);
 	size_t on_page_key_size = sizeof(OnPageItemHeader) + adjustAlign(ksize);
 	size_t on_page_val_size = sizeof(OnPageItemHeader) + adjustAlign(vsize);
 	size_t need = min(on_page_key_size, off_page_size) + min(on_page_val_size, off_page_size);
@@ -575,6 +585,7 @@ bool BTree::insertLeafItem(page_id_t page_id, uint32_t index,
 	}
 	else
 	{
+
 		setItemType(p, ItemType::OffPage);
 		((OffPageItemHeader*)p)->ov_page_id_ = store_->getOverflowPageId();
 		((OffPageItemHeader*)p)->ov_off_ = store_->getOverflowPageOffset();
@@ -623,14 +634,14 @@ void BTree::insertInternalItem(page_id_t pid, page_id_t lid, page_id_t rid,
 		else
 		{
 			size_t total = ((OffPageItemHeader*)p)->total_size_;
-			split_buf_.append(p + sizeof(OffPageItemHeader), ((OffPageItemHeader*)p)->local_size_);
-			total -= ((OffPageItemHeader*)p)->local_size_;
+			split_buf_.append(p + sizeof(OffPageItemHeader), getItemSize(p) - sizeof(OffPageItemHeader));
+			total -= getItemSize(p) - sizeof(OffPageItemHeader);
 			page_id_t pid = ((OffPageItemHeader*)p)->ov_page_id_;
 			offset_t off = ((OffPageItemHeader*)p)->ov_off_;
 			while (total > 0)
 			{
 				void* page = store_->getPage(pid);
-				size_t read_bytes = min(page_size_ - (off + sizeof(size_t)), total);
+				size_t read_bytes = min(page_size_-off, total);
 				split_buf_.append((byte*)page + off, read_bytes);
 				total -= read_bytes;
 				if (total <= 0)
@@ -638,7 +649,7 @@ void BTree::insertInternalItem(page_id_t pid, page_id_t lid, page_id_t rid,
 					break;
 				}
 				pid = ((OverflowPageHeader*)page)->next_;
-				off = 0;
+				off = sizeof(OverflowPageHeader);
 				page = store_->getPage(pid);
 			}
 		}
@@ -697,11 +708,11 @@ size_t getItemSize(const void* p)
 {
 	if (getItemType(p) == ItemType::OnPage)
 	{
-		return sizeof(OnPageItemHeader) + ((OnPageItemHeader*)p)->size_;
+		return sizeof(OnPageItemHeader) + (((OnPageItemHeader*)p)->size_ & ~(0x1 << ((sizeof(size_t) << 3) - 1)));
 	}
 	else
 	{
-		return sizeof(OffPageItemHeader) + ((OffPageItemHeader*)p)->local_size_;
+		return sizeof(OffPageItemHeader) + (((OffPageItemHeader*)p)->local_size_ & ~(0x1 << ((sizeof(size_t) << 3) - 1)));
 	}
 }
 
@@ -865,17 +876,15 @@ void BTree::compactInternalPage(void* page)
 {
 	data_buf_.clear();
 	size_t n = getInternalItemCount(page);
-	size_t total = 0;
 	size_t size;
 	byte* item;
 
 	for (uint32_t i = 0; i < n; ++i)
 	{
 		item = (byte*)page + getInternalItemOffset(page, i);
-		size = getItemSize(item+sizeof(size)) + sizeof(page_id_t);
+		size = getItemSize(item+sizeof(page_id_t)) + sizeof(page_id_t);
 		data_buf_.append(&size, sizeof(size));
 		data_buf_.append(item, size);
-		total += size;
 	}
 
 	byte* buffer = data_buf_.getBuffer();
@@ -913,6 +922,36 @@ void BTree::removeItem(page_id_t page_id, uint32_t index)
 	for (uint32_t i = index; i < n; ++i)
 	{
 		setLeafItemOffset(page, i, getLeafItemOffset(page, i+2));
+	}
+	compactLeafPage(page);
+}
+
+void BTree::traverse(iterfunc func)
+{
+	page_id_t pid = store_->getRootId();
+	void* page = store_->getPage(pid);
+	while(getPageType(page) == PageType::Internal)
+	{
+		pid = getChild(page, 0);
+		page = store_->getPage(pid);
+	}
+
+	for(;;)
+	{
+		for (uint32_t i = 0; i < getLeafItemCount(page); ++i)
+		{
+			getItem(page, i, data_buf_);
+			(*func)(data_buf_.getBuffer(), data_buf_.getSize());
+		}
+		pid = getLeafNext(page);
+		if (pid == 0)
+		{
+			break;
+		}
+		else
+		{
+			page = store_->getPage(pid);
+		}
 	}
 }
 

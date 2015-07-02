@@ -111,6 +111,11 @@ public:
 	{}
 };
 
+struct OverflowPageHeader {
+	page_id_t next_;
+	offset_t off_;
+};
+
 NAMESPACE_END
 
 #endif
