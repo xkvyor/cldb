@@ -1,16 +1,17 @@
 #include "file.h"
 #include "storage.h"
 #include "btree.h"
+#include "hash.h"
 #include "cldb.h"
 
 NAMESPACE_BEGIN
 
-DB::DB(): store_(NULL), tree_(NULL), valid_(false)
+DB::DB(): store_(NULL), db_(NULL), valid_(false)
 {}
 
 DB::~DB()
 {
-	deletePtr(tree_);
+	deletePtr(db_);
 	deletePtr(store_);
 }
 
@@ -35,7 +36,19 @@ bool DB::open(const char* filename)
 		return false;
 	}
 
-	tree_ = new BTree(store_);
+	if (store_->getType() == DBType::BTreeDB)
+	{
+		db_ = new BTree(store_);
+	}
+	else if (store_->getType() == DBType::HashDB)
+	{
+		db_ = new Hash(store_);
+	}
+	else
+	{
+		return false;
+	}
+
 	return true;
 }
 
@@ -76,15 +89,26 @@ bool DB::create(const DBConfig& config)
 		return false;
 	}
 
-	tree_ = new BTree(store_);
+	if (store_->getType() == DBType::BTreeDB)
+	{
+		db_ = new BTree(store_);
+	}
+	else if (store_->getType() == DBType::HashDB)
+	{
+		db_ = new Hash(store_);
+	}
+	else
+	{
+		return false;
+	}
 	return true;
 }
 
 size_t DB::get(const void* key, size_t ksize, void* buf, size_t buf_size)
 {
-	if (tree_)
+	if (db_)
 	{
-		return tree_->get(key, ksize, buf, buf_size);
+		return db_->get(key, ksize, buf, buf_size);
 	}
 	else
 	{
@@ -94,24 +118,24 @@ size_t DB::get(const void* key, size_t ksize, void* buf, size_t buf_size)
 
 void DB::put(const void* key, size_t ksize, const void* val, size_t vsize)
 {
-	if (tree_)
+	if (db_)
 	{
-		return tree_->put(key, ksize, val, vsize);
+		return db_->put(key, ksize, val, vsize);
 	}
 }
 
 void DB::del(const void* key, size_t ksize)
 {
-	if (tree_)
+	if (db_)
 	{
-		tree_->remove(key, ksize);
+		db_->remove(key, ksize);
 	}
 }
 
 void DB::close()
 {
 	valid_ = false;
-	deletePtr(tree_);
+	deletePtr(db_);
 	deletePtr(store_);
 }
 

@@ -36,20 +36,20 @@ class Storage;
 
 typedef void (*iterfunc)(const void* data, size_t size);
 
-class BTree {
+class BTree : public DBInterface {
 private:
 	Storage* store_;
 	size_t page_size_;
-	Buffer data_buf_;
-	Buffer cmp_buf_;
-	Buffer split_buf_;
+	Buffer* data_buf_;
+	Buffer* cmp_buf_;
+	Buffer* split_buf_;
 
 	void buildRootPage(BTreePageType type);
 	void get(const void* key, size_t ksize);
 	bool rec_search(const void* key, size_t ksize, page_id_t* page_id, uint32_t* index);
 	bool search(void* page, const void* key, size_t ksize, uint32_t* index);
-	void getItem(page_id_t page_id, uint32_t index, Buffer& buf);
-	void getItem(void* page, uint32_t index, Buffer& buf);
+	void getItem(page_id_t page_id, uint32_t index, Buffer* buf);
+	void getItem(void* page, uint32_t index, Buffer* buf);
 	int32_t compare(void* page, uint32_t index, const void* key, size_t ksize);
 
 	bool modifyLeafItem(page_id_t page_id, uint32_t index, const void* val, size_t vsize);

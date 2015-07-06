@@ -6,12 +6,11 @@
 NAMESPACE_BEGIN
 
 class Storage;
-class BTree;
 
 class DB {
 private:
 	Storage* store_;
-	BTree* tree_;
+	DBInterface* db_;
 
 	bool valid_;
 

@@ -78,6 +78,7 @@ struct DBHeader {
 	offset_t overflow_offset_;
 	page_id_t free_pages_;
 	size_t min_items_;
+	uint32_t factor_;
 	page_id_t root_id_;
 };
 
@@ -96,6 +97,7 @@ public:
 	DBType type_;
 	size_t page_size_;
 	size_t cache_size_;
+	uint32_t factor_;
 	size_t min_items_;
 
 public:
@@ -107,7 +109,8 @@ public:
 		size_t min_items = DBConfig::default_min_items):
 		filename_(fn), create_(create),
 		type_(type), page_size_(page_size),
-		cache_size_(cache_size), min_items_(min_items)
+		cache_size_(cache_size),
+		min_items_(min_items)
 	{}
 };
 
@@ -134,9 +137,85 @@ struct OffPageItemHeader {
 	offset_t ov_off_;
 };
 
+static inline void setItemType(void* item, ItemType type);
+static inline ItemType getItemType(const void* item);
+static inline void setItemLocalDataSize(void* item, size_t size);
+static inline size_t getItemLocalDataSize(const void* item);
+static inline void* getItemLocalData(const void* item);
+static inline size_t getItemSizeOnPage(const void* item);
+
+void setItemType(void* item, ItemType type)
+{
+	if (type == 0)
+	{
+		*(size_t*)item &= ~(0x1 << ((sizeof(size_t) << 3) - 1));
+	}
+	else
+	{
+		*(size_t*)item |= (0x1 << ((sizeof(size_t) << 3) - 1));
+	}
+}
+
+ItemType getItemType(const void* item)
+{
+	return (*(size_t*)item & (0x1 << ((sizeof(size_t) << 3) - 1))) ? ItemType::OffPage : ItemType::OnPage;
+}
+
+
+void setItemLocalDataSize(void* item, size_t size)
+{
+	ItemType type = getItemType(item);
+	((OnPageItemHeader*)item)->size_ = size;
+	setItemType(item, type);
+}
+
+size_t getItemLocalDataSize(const void* p)
+{
+	if (getItemType(p) == ItemType::OnPage)
+	{
+		return (((OnPageItemHeader*)p)->size_ & ~(0x1 << ((sizeof(size_t) << 3) - 1)));
+	}
+	else
+	{
+		return (((OffPageItemHeader*)p)->local_size_ & ~(0x1 << ((sizeof(size_t) << 3) - 1)));
+	}
+}
+
+void* getItemLocalData(const void* item)
+{
+	return getItemType(item) == ItemType::OnPage ?
+		(byte*)item + sizeof(OnPageItemHeader) :
+		(byte*)item + sizeof(OffPageItemHeader);
+}
+
+size_t getItemSizeOnPage(const void* p)
+{
+	if (getItemType(p) == ItemType::OnPage)
+	{
+		return sizeof(OnPageItemHeader) + (((OnPageItemHeader*)p)->size_ & ~(0x1 << ((sizeof(size_t) << 3) - 1)));
+	}
+	else
+	{
+		return sizeof(OffPageItemHeader) + (((OffPageItemHeader*)p)->local_size_ & ~(0x1 << ((sizeof(size_t) << 3) - 1)));
+	}
+}
+
 class Iterator {
 public:
 	virtual void process(const void* key, size_t ksize, const void* val, size_t vsize) = 0;
+};
+
+class DBInterface {
+public:
+	virtual ~DBInterface() {}
+
+	virtual size_t get(const void* key, size_t ksize,
+					void* buf, size_t size) = 0;
+	virtual size_t get(const void* key, size_t ksize, void** val) = 0;
+	virtual void put(const void* key, size_t ksize, const void* val, size_t vsize) = 0;
+	virtual void remove(const void* key, size_t ksize) = 0;
+
+	virtual void traverse(Iterator* iter) = 0;
 };
 
 NAMESPACE_END
